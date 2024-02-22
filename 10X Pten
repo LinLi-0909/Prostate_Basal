@@ -1,0 +1,180 @@
+K5CP.combined <- readRDS('../K5CP.combined.rds')
+Basal_Pten <- K5CP.combined[,K5CP.combined$cluster=='Basal']
+Basal_Pten#22373 features across 5312 samples within 2 assays 
+Basal_Pten <- CreateSeuratObject(counts = Basal_Pten@assays$RNA@counts,min.cells = 3,min.features = 200,meta.data = Basal_Pten@meta.data)
+VlnPlot(Basal_Pten,features = c('nCount_RNA','nFeature_RNA','percent.mt'))
+Basal_Pten <- subset(Basal_Pten,nCount_RNA<50000 &percent.mt <10)
+Basal_Pten <- NormalizeData(object = Basal_Pten, normalization.method = "LogNormalize", scale.factor = 10000)
+Basal_Pten <- FindVariableFeatures(Basal_Pten, selection.method = "vst", nfeatures = 2000)
+all.genes <- rownames(Basal_Pten)
+Basal_Pten <- ScaleData(Basal_Pten, features = all.genes)
+Basal_Pten <- RunPCA(Basal_Pten, features = VariableFeatures(object = Basal_Pten))
+#Basal_Pten <- RunHarmony(Basal_Pten,group.by.vars = c('state'),plot_convergence	=T)
+Basal_Pten <- RunUMAP(Basal_Pten, reduction = "pca", dims = 1:20)
+Basal_Pten <- FindNeighbors(Basal_Pten, reduction = "pca", dims = 1:20)
+Basal_Pten <- FindClusters(Basal_Pten,resolution = 0.09)
+p1=DimPlot(Basal_Pten,reduction = 'umap',cols =brewer.pal(6,'Set2'),pt.size = 1.5 )
+p2=DimPlot(Basal_Pten,reduction = 'umap',group.by = 'state',cols =brewer.pal(6,'Set1'),pt.size = 1.5 )
+cluster <- as.character(Basal_Pten$seurat_clusters)
+cluster[cluster==0]='Basal-B'
+cluster[cluster==1]='Basal-A'
+Basal_Pten$cluster <-cluster
+Idents(Basal_Pten) <- factor(cluster,levels = c('Basal-A','Basal-B'))
+pdf('Pten_basal.pdf',width = 16,height = 6)
+p1+p2
+dev.off()
+pdf('B_marker.pdf',width = 8,height = 10)
+FeaturePlot(Basal_Pten,features = c('Krt5','Krt14','Trp63','Nkx3-1','C1rb','Pbsn'))
+dev.off()
+pdf('Basal——vln.pdf',width = 8,height = 3)
+VlnPlot(Basal_Pten,features =c('Nkx3-1','C1rb','Pbsn'),pt.size = 0,,cols =brewer.pal(6,'Set2'))
+dev.off()
+basal_marker <- read.csv('../../qinju/Basal_RNA_marker.csv',header = T)
+m <- basal_marker[basal_marker$cluster==1,]
+m <- m[m$p_val<=0.01,]
+dim(m)
+g = list(m$gene[1:1000])
+Basal_Pten <- AddModuleScore(Basal_Pten,features = g,name = 'b')
+VlnPlot(Basal_Pten,features = 'b1',cols =brewer.pal(6,'Set2'))
+s <- Basal_Pten$b1
+sa <- s[Basal_Pten$cluster=='Basal-A']
+sb <- s[Basal_Pten$cluster=='Basal-B']
+t.test(sb,sa,alternative = 'greater')
+saveRDS(Basal_Pten,file = 'Basal_Pten.rds')
+Basal.list <- SplitObject(Basal_Pten, split.by = "state")
+Basal.list <- lapply(X = Basal.list, FUN = function(x) {
+  x <- NormalizeData(x)
+  x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
+})
+
+# select features that are repeatedly variable across datasets for integration
+features <- SelectIntegrationFeatures(object.list = Basal.list)
+Basal.anchors <- FindIntegrationAnchors(object.list = Basal.list, anchor.features = features)
+# this command creates an 'integrated' data assay
+Basal.combined <- IntegrateData(anchorset = Basal.anchors)
+DefaultAssay(Basal.combined) <- "integrated"
+Basal.combined <- ScaleData(Basal.combined, verbose = FALSE)
+Basal.combined <- RunPCA(Basal.combined, npcs = 30, verbose = FALSE)
+Basal.combined <- RunUMAP(Basal.combined, reduction = "pca", dims = 1:12)
+Basal.combined <- FindNeighbors(Basal.combined, reduction = "pca", dims = 1:12)
+Basal.combined <- FindClusters(Basal.combined, resolution = 0.05)
+p1 <- DimPlot(Basal.combined, reduction = "umap", group.by = "state",cols =brewer.pal(6,'Set1'),pt.size = 1.2)
+p2 <- DimPlot(Basal.combined, reduction = "umap", pt.size = 1.2,label = F, repel = TRUE,cols =c(brewer.pal(8,'Set2'),brewer.pal(8,'Set3')))
+p2
+DefaultAssay(Basal.combined) <-'RNA'
+pdf('Basal_marker_vln.pdf',width = 9,height = 9)
+VlnPlot(Basal.combined,features =  c('Nkx3-1','C1rb','Pbsn','Chka','Sdk1','Tgm4','Gadd45g','Fth1','Rps21'),pt.size = 0,brewer.pal(8,'Set2'))
+dev.off()
+pdf('Basal_marker_umap.pdf',width = 10,height = 9)
+FeaturePlot(Basal.combined,features =  c('Nkx3-1','C1rb','Pbsn','Chka','Sdk1','Tgm4','Gadd45g','Fth1','Rps21'))
+dev.off()
+Basal.combined <- readRDS('F:/Basal_AB/Revise/10x_K5CP/2/Basal_Pten.rds')
+marker <- FindAllMarkers(Basal.combined,only.pos = T,logfc.threshold = 0.25)
+dim(marker)
+marker_A <- marker[marker$cluster=='Basal-A',]
+marker_B <- marker[marker$cluster=='Basal-B',]
+write.csv(marker,'Pten_marker.csv')
+##
+library(irGSEA)
+library(Seurat)
+library(UCell)
+Basal.combined <- irGSEA.score(object = Basal.combined, assay = "RNA",
+                      slot = "data", seeds = 123, ncores = 1,
+                      min.cells = 3, min.feature = 0,
+                      custom = F, geneset = NULL, msigdb = T,
+                      species = "Mus musculus", category = "H",  
+                      subcategory = NULL, geneid = "symbol",
+                      method = c("AUCell", "UCell", "singscore",
+                                 "ssgsea"),
+                      aucell.MaxRank = NULL, ucell.MaxRank = NULL,
+                      kcdf = 'Gaussian')
+result.dge <- irGSEA.integrate(object = Basal.combined,
+                               group.by = "cluster",
+                               metadata = NULL, col.name = NULL,
+                               method = c("AUCell", "UCell","singscore"))
+
+
+singscore<- result.dge$singscore
+singscore<- singscore[singscore$p_val<=0.01,]
+dim(singscore)
+singscore_B <- singscore[singscore$direction=='up',]
+dim(singscore_B)
+singscore_B <- singscore_B[singscore_B$cluster=='Basal-B',]
+singscore_B$log <- -log10(singscore_B$p_val)
+singscore_B <- singscore_B[order(singscore_B$log,decreasing = F),]
+singscore_B$Name <- factor(singscore_B$Name,levels =singscore_B$Name )
+write.csv(singscore_B,'singscore_B.csv')
+singscore_B <- read.csv('singscore_B.csv',header = T,row.names = 1)
+pdf('Enrichment.pdf',width = 7,height = 7)
+ggplot(singscore_B,aes(x=Name,y=log,
+                       fill=log))+  coord_flip() +
+  geom_bar(stat='identity')+ 
+  labs(x='-LOG10(P-value)')+             #?޸???????????
+  theme_bw(base_size = 12)+ #?Զ?????????
+  theme(axis.text = element_text(colour = 'black'),
+        legend.position = 'none')+scale_fill_gradient(high = "#961E23",low = "#FF8A8D")
+dev.off()
+Jak <- read.csv('F:/Basal_AB/Revise/10x_Ecoli/E2W/IL6_JAK_stat3.csv',header = T)
+head(Jak)
+Jak <- as.list(Jak)
+Basal.combined <- AddModuleScore(Basal.combined,features = Jak,name = 'Jak')
+pdf('Jak_stat.pdf',width = 6,height = 5)
+VlnPlot(Basal.combined,features = 'Jak1',pt.size = 0)
+dev.off()
+DefaultAssay(Basal.combined)<-'RNA'
+VlnPlot(Basal.combined,features = c('Stat1','Stat3','Stat5'))
+##scNME
+Basal.combined <- readRDS('Basal_Pten.rds')
+tf <- read.csv('/Basal_AB/Revise/NG_WT/SCENIC/mm_mgi_tfs.txt',header = F)
+head(tf)
+Basal.combined <- FindVariableFeatures(Basal.combined,nfeatures = 4000)
+genes <- VariableFeatures(Basal.combined)
+genes <- unique(c(genes,tf$V1))
+data <- GetAssayData(Basal.combined,slot = 'data')
+data_f <- data[rownames(data)%in%genes,]
+dim(data_f)
+cell_b <- names(Basal.combined$cluster[Basal.combined$cluster=='Basal-B'])
+cell_b <- sample(cell_b,1500)
+cell_a <-  names(Basal.combined$cluster[Basal.combined$cluster=='Basal-A'])
+cell <- c(cell_a,cell_b)
+data_fs <- data_f[,colnames(data_f)%in%cell]
+dim(data_fs)
+write.csv(data_f,'data_Pten.csv')
+write.csv(data_fs,'data_Pten_s.csv')
+data_fs <- read.csv('data_Pten_s.csv',header = T,row.names = 1)
+dim(data_fs)
+head(data_fs[,1:4])
+write.csv(data,'data.csv')
+data <- read.csv('data.csv',header=T,row.names=1)
+meta <- data.frame(cell= colnames(data),cluster=Basal.combined$cluster)
+cell <- data.frame(cell=colnames(data_fs))
+meta1 <- merge(cell,meta,all = F,sort = F)
+NFE <- read.csv('NFE.csv',header = T,row.names = 1)
+dim(NFE)
+colnames(NFE)<- meta1$cell
+gene = rownames(NFE)
+x = apply(NFE,1,function(x){sum(x!=0)})
+gene = paste(gene,'(',x,'g)',sep = '')
+rownames(NFE)<- gene
+head(NFE)[,1:4]
+library(Seurat)
+rownames(meta1)<- meta1$cell
+NFE_S <- CreateSeuratObject(counts = NFE,min.cells = 1,min.features = 1,meta.data = meta1)
+NFE_S
+NFE_S@assays$RNA@data<- NFE_S@assays$RNA@counts
+Idents(NFE_S)<- NFE_S$cluster
+marker <- FindAllMarkers(NFE_S,logfc.threshold = 0.1,only.pos = T)
+gene <- c('Ahr(202g)','Klf7(210g)','Klf5(252g)','Irf1(228g)')
+DotPlot(NFE_S, features = gene,group.by = 'cluster',dot.scale = 10,dot.min=0)+RotatedAxis()+
+  scale_x_discrete("")+scale_y_discrete()+scale_color_gradientn(colours = rev(c("chocolate","white","slateblue")))+
+  scale_size_continuous(range=c(5, 11))+theme(panel.grid = element_line(color="lightgrey"))
+
+
+NFE <- read.csv('NFE.csv',header = T,row.names = 1)
+dim(NFE)
+colnames(NFE)<- colnames(Basal.combined)
+gene = rownames(NFE)
+x = apply(NFE,1,function(x){sum(x!=0)})
+gene = paste(gene,'(',x,'g)',sep = '')
+rownames(NFE)<- gene
+head(NFE)[,1:4]
