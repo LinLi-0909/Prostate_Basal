@@ -1,0 +1,192 @@
+library(Seurat)
+library(patchwork)
+library(RColorBrewer)
+library(ggplot2)
+library(harmony)
+library(dplyr)
+
+E2W_count <- Read10X('../E2W/filtered_feature_bc_matrix/')
+E2W <- CreateSeuratObject(counts = E2W_count,min.cells = 10,min.features = 200)
+E2W#22341 features across 17182 samples within 1 assay
+E2W[["percent.mt"]] <- PercentageFeatureSet(E2W, pattern = "^mt-")
+VlnPlot(object =E2W, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"),
+        ncol = 3) 
+E2W <- subset(E2W,percent.mt<15&nCount_RNA<50000)
+E2W#22341 features across 16002 samples within 1 assay
+E2W <- NormalizeData(object = E2W, normalization.method = "LogNormalize", scale.factor = 10000)
+E2W <- FindVariableFeatures(E2W, selection.method = "vst", nfeatures = 4000)
+all.genes <- rownames(E2W)
+E2W <- ScaleData(E2W, features = all.genes)
+E2W <- RunPCA(E2W, features = VariableFeatures(object = E2W)) 
+ElbowPlot(E2W)
+E2W <- RunUMAP(E2W , reduction = "pca", dims = 1:10)
+E2W  <- FindNeighbors(E2W , reduction = "pca", dims = 1:10)
+E2W  <- FindClusters(E2W ,resolution = 0.05)
+DimPlot(E2W ,reduction = 'umap',pt.size = 1.2,label = F,cols = c(brewer.pal(9,'Paired'),brewer.pal(3,'Set2')))
+saveRDS(E2W,file = 'E2W.rds')
+
+Basal <- E2W[,E2W$cluster=='Basal']
+Basal#22341 features across 2455 samples within 1 assay 
+counts <- Basal@assays$RNA@counts
+a <- counts[rownames(counts)=='S100a8',]
+count <- counts[,a==0]
+dim(count)#22341  2011
+Basal <- CreateSeuratObject(counts = count,min.cells = 10,min.features = 200 )
+Basal[["percent.mt"]] <- PercentageFeatureSet(Basal, pattern = "^mt-")
+VlnPlot(Basal, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+Basal#16895 features across 2011 samples within 1 assay 
+Basal <- subset(Basal,nFeature_RNA<6000&percent.mt <5&nCount_RNA<30000)
+Basal <- NormalizeData(object =Basal, normalization.method = "LogNormalize", scale.factor = 10000)
+Basal <- FindVariableFeatures(Basal, selection.method = "vst", nfeatures = 2000)
+all.genes <- rownames(Basal)
+Basal<- ScaleData(Basal, features = all.genes)
+Basal <- RunPCA(Basal, features = VariableFeatures(object = Basal))
+ElbowPlot(Basal)
+Basal <- RunUMAP(Basal , reduction = "pca", dims = 1:10)
+Basal <- FindNeighbors(Basal, reduction = "pca", dims = 1:10) 
+Basal <- FindClusters(Basal,resolution = 0.02)
+cluster <- as.character(Basal$seurat_clusters)
+cluster[cluster==0]='Basal-B'
+cluster[cluster==1]='Basal-A'
+Basal$cluster <- factor(cluster,levels = c('Basal-A','Basal-B'))
+Idents(Basal)<-Basal$cluster
+pdf('Basal_UMAP.pdf',width = 7.5,height = 6)
+DimPlot(Basal,pt.size = 1.5,cols = brewer.pal(6,'Set2'))
+dev.off()
+pdf('F:/Basal_AB/Revise/10x_Ecoli/E2W/Basal_vln.pdf',width = 7,height = 7)
+VlnPlot(Basal,features = c('Nkx3-1','C1rb','Pbsn','Lmo7','Slc1a5','Ppp3ca','Lcn2','Phlda1','Krt17'),pt.size = 0,cols = brewer.pal(6,'Set2'))
+dev.off()
+pdf('Basal_marker.pdf',width = 6,height = 7)
+FeaturePlot(Basal,features = c('Nkx3-1','C1rb','Pbsn','Krt5','Krt14','Trp63'),pt.size = 1)
+dev.off()
+marker <- FindAllMarkers(Basal,only.pos = T,logfc.threshold = 0.25)
+m1 <- marker[marker$cluster=='Basal-A',]
+m2 <- marker[marker$cluster=='Basal-B',]
+write.csv(marker,'E-coli_marker.csv')
+marker %>%
+  group_by(cluster) %>%
+  dplyr::filter(avg_log2FC > 1) %>%
+  slice_head(n = 15) %>%
+  ungroup() -> top15
+pdf('Basal_dotplot.pdf',width = 14,height = 5)
+DotPlot(Basal, features = top15$gene,dot.scale = 10,dot.min=0)+RotatedAxis()+
+  scale_x_discrete("")+scale_y_discrete()+scale_color_gradientn(colours = rev(c("chocolate","white","slateblue")))+
+  scale_size_continuous(range=c(5, 11))+theme(panel.grid = element_line(color="lightgrey"))
+dev.off()
+pdf('Basal_Vln.pdf',width = 8,height = 16)
+VlnPlot(Basal,features = c(top15$gene,'Krt17','Nkx3-1'),pt.size = 0,cols = brewer.pal(4,'Set2'))
+dev.off()
+pdf('Basal_Vln1.pdf',width = 8,height = 6)
+VlnPlot(Basal,features = c('Krt17','Ociad2','Rmst','Nkx3-1','Meis1','Pid1'),pt.size = 0,cols = brewer.pal(4,'Set2'))
+dev.off()
+pdf('Basal_Umap1.pdf',width = 8,height = 9)
+FeaturePlot(Basal,features = c('Krt17','Nkx3-1','Ociad2','Meis1','Rmst','Pid1'))
+dev.off()
+
+marker %>%
+  group_by(cluster) %>%
+  dplyr::filter(avg_log2FC > 1) %>%
+  slice_head(n = 30) %>%
+  ungroup() -> top30
+
+pdf('Basal_Heatmap.pdf',width = 5,height = 8)
+DoHeatmap(Basal,features =top30$gene)
+dev.off()
+
+Luminal <- E2W[,E2W$cluster=='Luminal']
+id_L <- colnames(Luminal)
+id_B <- colnames(Basal)
+EP <- E2W[,colnames(E2W)%in%c(id_L,id_B)]
+count <- EP@assays$RNA$counts
+dim(count)
+id_cell <- data.frame(cell=colnames(count),cluster=as.character(EP$cluster))
+head(id_cell)
+cluster_B <- Basal$cluster
+id_BasalB <- names(cluster_B[cluster_B=='Basal-B'])
+id_BasalA <- names(cluster_B[cluster_B=='Basal-A'])
+id_cell[id_cell$cell%in%id_BasalB,]$cluster <-'Basal-B'
+id_cell[id_cell$cell%in%id_BasalA,]$cluster <-'Basal-A'
+table(id_cell$cluster)
+rownames(id_cell)<- id_cell$cell
+dim(count)#22341  2452
+dim(id_cell)
+pd <- new('AnnotatedDataFrame', data = id_cell)
+fData <- data.frame(gene_short_name = row.names(count), row.names = row.names(count))
+fd <- new('AnnotatedDataFrame', data = fData)
+
+#Construct monocle cds
+monocle_cds <- newCellDataSet(count,
+                              phenoData = pd,
+                              featureData = fd,
+                              lowerDetectionLimit = 0.5,
+                              expressionFamily = negbinomial.size())
+HSMM <- monocle_cds
+HSMM <- estimateSizeFactors(HSMM)
+HSMM <- estimateDispersions(HSMM)
+HSMM <- detectGenes(HSMM, min_expr = 0.1)
+expressed_genes <- row.names(subset(fData(HSMM),
+                                    num_cells_expressed >= 3))
+
+diff_test_res <- differentialGeneTest(HSMM,fullModelFormulaStr = "~cluster",cores = 5)
+dim(diff_test_res)
+ordering_genes <- row.names(subset(diff_test_res, qval < 0.001))
+length(ordering_genes)
+HSMM <- setOrderingFilter(HSMM, ordering_genes)
+plot_ordering_genes(HSMM)
+HSMM <- reduceDimension(HSMM, max_components = 2,reduction_method  = 'DDRTree')
+HSMM <- orderCells(HSMM)
+pdf('trajectory_pseudotime.pdf',width = 6.3,height = 7)
+plot_cell_trajectory(HSMM, color_by = "Pseudotime")
+dev.off()
+pdf('trajectory_cluster.pdf',width = 6.3,height = 7)
+plot_cell_trajectory(HSMM, color_by = "cluster",cell_size = 0.8)
+dev.off()
+plot_cell_trajectory(HSMM, color_by = "State")
+saveRDS(HSMM,file='HSMM_EW_EP.rds')
+
+
+##scNME
+
+##scNME for Ecoli
+
+Basal<- readRDS('Basal.rds')
+length(VariableFeatures(Basal))
+Basal <- FindVariableFeatures(Basal,nfeatures = 4000)
+features <- VariableFeatures(Basal)
+features
+mouse_TF <- read.csv('scNME/mm_mgi_tfs.txt',header = F)
+head(mouse_TF)
+features <- unique(c(features,mouse_TF$V1))
+length(features)
+data <- GetAssayData(Basal,slot = 'data')
+data_filter <- data[rownames(data)%in%features,]
+dim(data_filter)#4431 1785
+write.csv(data_filter,'scNME/data_scNME.csv')
+
+setwd('F:/Basal_AB/Revise/10x_Ecoli/E2W/scNME')
+library(Seurat)
+Basal <- readRDS('../Basal.rds')
+NFE <- read.csv('NFE.csv',header = T,row.names = 1)
+dim(NFE)
+colnames(NFE)<- colnames(Basal)
+gene = rownames(NFE)
+x = apply(NFE,1,function(x){sum(x!=0)})
+gene = paste(gene,'(',x,'g)',sep = '')
+rownames(NFE)<- gene
+NFE_S <- CreateSeuratObject(counts = NFE,min.cells = 3,min.features = 1)
+NFE_S#1284 features across 1785 samples within 1 assay
+NFE_S@assays$RNA@data<- NFE_S@assays$RNA@counts
+NFE_S$cluster <- Basal$cluster
+Idents(NFE_S)<- NFE_S$cluster
+marker <- FindAllMarkers(NFE_S,logfc.threshold = 0.4,only.pos = T)
+NFE_S<- ScaleData(NFE_S)
+genes= c('Nkx3-1(509g)',"Stat5a(600g)", 'Irf3(477g)',"Stat5b(934g)")
+pdf('B_inflammatory.pdf',width = 8,height = 4)
+DotPlot(NFE_S, features = genes,group.by = 'cluster',dot.scale = 10,dot.min=0)+RotatedAxis()+
+  scale_x_discrete("")+scale_y_discrete()+scale_color_gradientn(colours = rev(c("chocolate","white","slateblue")))+
+  scale_size_continuous(range=c(5, 11))+theme(panel.grid = element_line(color="lightgrey"))
+dev.off()
+pdf('all_network.pdf',width = 12,height = 16)
+DoHeatmap(NFE_S,features = marker$gene)
+dev.off()
+saveRDS(NFE_S,file = 'NFE_ecoli.rds')
