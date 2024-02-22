@@ -1,0 +1,178 @@
+library(WGCNA)
+Basal<- readRDS('Basal.rds')##E-coli
+data <- GetAssayData(Basal,slot = 'data')
+dim(data)
+cluster <- Basal$cluster
+WGCNA_matrix = t(data[order(apply(data,1,mad), decreasing = T)[1:5000],])
+dim(WGCNA_matrix)
+datExpr0 <- WGCNA_matrix  ## top 5000 mad genes
+datExpr <- datExpr0
+datTraits = data.frame(gsm=colnames(Basal),
+                       subtype=Basal$cluster)
+head(datTraits)
+powers = c(c(1:10), seq(from = 12, to=20, by=2))
+# Call the network topology analysis function
+sft = pickSoftThreshold(datExpr, powerVector = powers, verbose = 5)
+net = blockwiseModules(
+  datExpr,
+  power = sft$powerEstimate,
+  maxBlockSize = 6000,
+  TOMType = "unsigned", minModuleSize = 10,
+  reassignThreshold = 0, mergeCutHeight = 0.2,
+  numericLabels = TRUE, pamRespectsDendro = FALSE,
+  saveTOMs = F, 
+  verbose = 3
+)
+table(net$colors) 
+mergedColors = labels2colors(net$colors)
+table(mergedColors)
+# Plot the dendrogram and the module colors underneath
+pdf("step3_genes-modules_ClusterDendrogram.pdf",width = 16,height = 12)
+plotDendroAndColors(net$dendrograms[[1]], moduleColors[net$blockGenes[[1]]],
+                    "Module colors",
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05)
+dev.off()
+power = sft$powerEstimate
+adjacency = adjacency(datExpr, power = power) 
+TOM = TOMsimilarity(adjacency)
+dissTOM = 1-TOM
+geneTree = hclust(as.dist(dissTOM), method = "average")
+plot(geneTree, xlab="", sub="", main = "Gene clustering on TOM-based dissimilarity",
+     labels = FALSE, hang = 0.04)
+minModuleSize = 10
+dynamicMods = cutreeDynamic(dendro = geneTree, distM = dissTOM,
+                            deepSplit = 2, pamRespectsDendro = FALSE,
+                            minClusterSize = minModuleSize)
+table(dynamicMods)
+dynamicColors = labels2colors(dynamicMods)
+table(dynamicColors)
+plotDendroAndColors(geneTree, dynamicColors, "Dynamic Tree Cut",
+                    dendroLabels = FALSE, hang = 0.03,
+                    addGuide = TRUE, guideHang = 0.05,
+                    main = "Gene dendrogram and module colors")
+MEList = moduleEigengenes(datExpr, colors = dynamicColors)
+MEs = MEList$eigengenes
+MEDiss = 1-cor(MEs)
+METree = hclust(as.dist(MEDiss), method = "average")
+
+
+datTraits$subtype <- as.factor(datTraits$subtype)
+design <- model.matrix(~0+datTraits$subtype)
+colnames(design) <- levels(datTraits$subtype) #get the group
+MES0 <- moduleEigengenes(datExpr,moduleColors)$eigengenes  #Calculate module eigengenes.
+MEs <- orderMEs(MES0)  #Put close eigenvectors next to each other
+moduleTraitCor <- cor(MEs,design,use = "p")
+moduleTraitPvalue <- corPvalueStudent(moduleTraitCor,nSamples)
+textMatrix <- paste0(signif(moduleTraitCor,2),"\n(",
+                     signif(moduleTraitPvalue,1),")")
+dim(textMatrix) <- dim(moduleTraitCor)
+pdf("step4_Module-trait-relationship_heatmap.pdf",
+    width = 2*length(colnames(design)), 
+    height = 0.6*length(names(MEs)) )
+par(mar=c(5, 9, 3, 3)) #留白：下、左、上、右
+labeledHeatmap(Matrix = moduleTraitCor,
+               xLabels = colnames(design),
+               yLabels = names(MEs),
+               ySymbols = names(MEs),
+               colorLabels = F,
+               colors = blueWhiteRed(50),
+               textMatrix = textMatrix,
+               setStdMargins = F,
+               cex.text = 0.5,
+               zlim = c(-1,1), 
+               main = "Module-trait relationships")
+dev.off()
+
+
+
+mes_group <- merge(MEs,datTraits,by="row.names") 
+library(gplots)
+library(ggpubr)
+library(grid)
+library(gridExtra) 
+TOM=TOMsimilarityFromExpr(datExpr,power=power)
+dissTOM=1-TOM
+## draw all genes 
+geneTree = net$dendrograms[[1]]
+plotTOM = dissTOM^7
+diag(plotTOM)=NA
+png("step5_TOMplot_Network-heatmap.png",width = 800, height=600) 
+TOMplot(plotTOM,geneTree,moduleColors,
+col=gplots::colorpanel(250,'red',"orange",'lemonchiffon'),
+main="Network heapmap plot")
+dev.off()
+
+module = "black"
+module='turquoise'
+module='grey'
+gene <- colnames(datExpr) 
+inModule <- moduleColors==module
+modgene <- gene[inModule]
+
+### 模块对应的基因关系矩阵
+TOM <- TOMsimilarityFromExpr(datExpr,power=power)
+modTOM <- TOM[inModule,inModule]
+dimnames(modTOM) <- list(modgene,modgene)
+
+### 筛选连接度最大的top50基因
+nTop = 50
+IMConn = softConnectivity(datExpr[, modgene]) #计算连接度
+top = (rank(-IMConn) <= nTop) #选取连接度最大的top100
+filter_modTOM <- modTOM[top, top]
+library(reshape2)
+# for cytoscape
+filter_modTOM[upper.tri(filter_modTOM, diag = TRUE)] <- 0
+filter_modTOM <- melt(filter_modTOM)
+filter_modTOM<- filter_modTOM[-which(filter_modTOM$value==0),]
+head(filter_modTOM)
+colnames(filter_modTOM)[1:2]<-c('source','target')
+filter_modTOM <- filter_modTOM[filter_modTOM$value>=0.02,]
+dim(filter_modTOM)
+write.csv(filter_modTOM,'MEblack_basal_A_network.csv',quote =F)
+write.csv(filter_modTOM,'MEturquoise_basal_A_network.csv',quote =F)
+write.csv(filter_modTOM,'MEgrey_basal_B_network.csv',quote =F)
+OrgDb = "org.Mm.eg.db"  # "org.Mm.eg.db"  "org.Hs.eg.db"
+genetype = "SYMBOL"    # "SYMBOL"   "ENSEMBL"
+table(moduleColors)
+choose_module <- c("black","grey")
+library(clusterProfiler)
+library(org.Mm.eg.db)
+
+gene_module <- data.frame(gene=colnames(datExpr),
+                          module=moduleColors)
+write.csv(gene_module,file = "step6_gene_moduleColors.csv",row.names = F, quote = F) 
+gene_module <- read.csv('step6_gene_moduleColors.csv',header = T)
+head(gene_module)
+tmp <- bitr(gene_module$gene,fromType = genetype,  # "SYMBOL"   "ENSEMBL"
+            toType = "ENTREZID",
+            OrgDb = OrgDb )
+gene_module_entrz <- merge(tmp,gene_module, by.x=genetype, by.y="gene")
+
+choose_gene_module_entrz <- gene_module_entrz[gene_module_entrz$module %in% choose_module,]
+
+###run go analysis
+formula_res <- compareCluster(
+  ENTREZID~module,
+  data = choose_gene_module_entrz,
+  fun = "enrichGO",
+  OrgDb = OrgDb,
+  ont = "BP",  #One of "BP", "MF", and "CC"  or "ALL"
+  pAdjustMethod = "BH",
+  pvalueCutoff = 0.07,
+  qvalueCutoff = 0.05
+)
+
+save(gene_module, formula_res, lineage1_ego, file="step6_module_GO_term.Rdata")
+write.csv(lineage1_ego@compareClusterResult,
+          file="step6_module_GO_term.csv")
+### 绘制dotplot图
+
+dotp <- dotplot(formula_res,
+                showCategory=15,
+                includeAll = TRUE, 
+                label_format=90)
+dotp
+pdf('network_enrichment.pdf',width = 8,height = 10)
+dotp
+dev.off()
