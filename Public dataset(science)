@@ -1,0 +1,137 @@
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(Matrix)
+library(patchwork)
+library(hdf5r)
+library(harmony)
+library(RColorBrewer)
+count <- Read10X_h5('F:/niche/public/Regenerative potential of prostate luminal cells revealed by single-cell analysis (Mouse)/GSE146811_mmProstate10x_timecourse_rawCount.h5')
+dim(count)#27998 87187
+meta <- read.csv('Intact_mouse_meta.csv',header = T)
+dim(meta)
+head(meta)
+count_intact <- count[,colnames(count)%in%meta$NAME]
+dim(count_intact)# 27998 13437
+cell_id <- data.frame(NAME=colnames(count_intact))
+head(cell_id)
+meta_new <- merge(cell_id,meta,all = F,sort = F)
+dim(meta_new)
+rownames(meta_new)<- meta_new$NAME
+saveRDS(count_intact,file = 'count_intact.rds')
+Intact <- CreateSeuratObject(counts = count_intact,meta.data = meta_new,min.cells = 3,min.features = 200)
+Intact#18678 features across 13437 samples within 1 assay 
+Intact <- NormalizeData(object = Intact, normalization.method = "LogNormalize", scale.factor = 10000)
+Intact <- FindVariableFeatures(Intact, selection.method = "vst", nfeatures = 1000)
+all.genes <- rownames(Intact)
+Intact <- ScaleData(Intact, features = all.genes)
+Intact <- RunPCA(Intact, features = VariableFeatures(object = Intact))
+Intact <- FindNeighbors(Intact, dims = 1:15)
+Intact <- FindClusters(Intact, resolution = 0.05)
+Intact <- RunUMAP(Intact, dims = 1:15)
+p1=DimPlot(Intact,reduction = 'umap',pt.size = 1.5,label = T)
+p2=DimPlot(Intact,reduction = 'umap',pt.size = 1.5,group.by = 'IntType')
+p1+p2
+p3 <-FeaturePlot(Intact,features = 'Trp63')
+p4 <-FeaturePlot(Intact,features = 'Nkx3-1')
+pdf('merge.pdf',width = 12,height = 6)
+p1+p2+p3+p4
+p1+p3
+dev.off()
+p1
+##0 Basal
+##1 Luminal
+##2 Stromal
+##3 #Macrophage
+##4 Endo
+##5 SV
+##6 PredictDoublet
+##7 stromal
+cluster <- as.character(Intact$seurat_clusters)
+cluster[cluster==0]<-'Basal'
+cluster[cluster==1]<-'Luminal'
+cluster[cluster==2]<-'Stromal'
+cluster[cluster==3]<-'Macro'
+cluster[cluster==4]<-'Endo'
+cluster[cluster==5]<-'SV'
+cluster[cluster==6]<-'Stromal'
+cluster[cluster==7]<-'Luminal-C'
+cluster[cluster==8]<-'Endo'
+cluster[cluster==9]<-'Stromal'
+cluster <- factor(cluster,levels = c('Basal','Luminal','Luminal-C','SV','Endo','Stromal','Macro'))
+Intact$cluster <- cluster
+Idents(Intact)<- Intact$cluster
+marker <- FindAllMarkers(Intact,only.pos = T,logfc.threshold = 0.25)
+
+pdf('Intact_umap.pdf',width = 8,height = 6)
+DimPlot(Intact,reduction = 'umap',pt.size = 1.5)
+dev.off()
+pdf('Intact_umap_batch_ID.pdf',width = 8,height = 6)
+DimPlot(Intact,reduction = 'umap',pt.size = 1.5,group.by = 'batchID')
+dev.off()
+gene=c("Krt5","Krt14","Trp63", "Krt8","Krt18",'Krt4','Psca','Svs2','Svs4',
+       "Kdr","Pecam1", "Col1a1","Col1a2",
+      "Ccl4","Retnla")
+pdf('marker_Intact.pdf',width = 16,height = 12)
+FeaturePlot(Intact,features = gene)
+dev.off()
+pdf('Dotplot_Intact.pdf',width = 12,height = 6)
+p1=DotPlot(Intact, features = gene,dot.scale = 10,dot.min=0)+RotatedAxis()+
+  scale_x_discrete("")+scale_y_discrete()+scale_color_gradientn(colours = rev(c("chocolate","white","slateblue")))+
+  scale_size_continuous(range=c(5, 11))+theme(panel.grid = element_line(color="lightgrey"))
+dev.off()
+saveRDS(Intact,file = 'Intact.rds')
+##
+Basal <- Intact[,Intact$seurat_clusters==0]
+Basal#18678 features across 3885 samples within 1 assay
+Basal <- NormalizeData(object = Basal, normalization.method = "LogNormalize", scale.factor = 10000)
+Basal <- FindVariableFeatures(Basal, selection.method = "vst", nfeatures = 1000)
+all.genes <- rownames(Basal)
+Basal <- ScaleData(Basal, features = all.genes)
+Basal <- RunHarmony(Basal,group.by.vars = c('batchID'),plot_convergence	=T)
+Basal <- RunUMAP(Basal, reduction = "harmony", dims = 1:10)
+Basal <- FindNeighbors(Basal, reduction = "harmony", dims = 1:10) %>% FindClusters(resolution = 0.03)
+
+basal_cluster <-as.character(Basal$seurat_clusters)
+basal_cluster[basal_cluster==0]='Basal-B'
+basal_cluster[basal_cluster==1]='Basal-A'
+Basal$cluster <- factor(basal_cluster,levels = c('Basal-A','Basal-B'))
+Idents(Basal)<- Basal$cluster
+pdf('Basal_Umap.pdf',width = 8,height = 6)
+DimPlot(Basal,reduction = 'umap',pt.size = 1.5,cols = brewer.pal(8,"Set2"))
+dev.off()
+
+VlnPlot(Basal,features = c('Nkx3-1','Krt14'))
+genes= c("Nkx3-1","Pbsn","C1rb","Krt17","Dlk2","Prelp")
+pdf('Basal_dotplot.pdf',width = 8,height = 5)
+DotPlot(Basal, features = genes,dot.scale = 10,dot.min=0)+RotatedAxis()+
+  scale_x_discrete("")+scale_y_discrete()+scale_color_gradientn(colours = rev(c("chocolate","white","slateblue")))+
+  scale_size_continuous(range=c(5, 11))+theme(panel.grid = element_line(color="lightgrey"))
+dev.off()
+
+VlnPlot(Basal,features = c('Krt5','Krt14','Trp63',"Nkx3-1","Pbsn","C1rb","Krt17","Dlk2","Prelp"),cols = brewer.pal(8,"Set2"),pt.size = 0)
+FeaturePlot(Basal,features = c('Krt5','Krt14','Trp63',"Nkx3-1","Pbsn","C1rb","Krt17","Dlk2","Prelp"))
+
+saveRDS(Basal,file = 'Basal.rds')
+
+
+##
+table(Intact$cluster)
+Basal
+cluster_basal <- data.frame(cell= colnames(Basal),cluster1=Basal$cluster)
+basal_A <- cluster_basal[cluster_basal$cluster1=='Basal-A',]$cell
+basal_B <- cluster_basal[cluster_basal$cluster1=='Basal-B',]$cell
+cluster <- as.character(Intact$cluster)
+names(cluster)<- colnames(Intact)
+cluster[names(cluster)%in%basal_A] <-'Basal-A'
+cluster[names(cluster)%in%basal_B] <-'Basal-B'
+table(cluster)
+Intact$cluster1 <- factor(cluster,levels = c('Basal-A','Basal-B','Luminal','Luminal-C','SV','Endo','Stromal','Macro'))
+levels(Intact$cluster1)
+pdf('Dotplot_Intact_AB.pdf',width = 12,height = 6)
+p2=DotPlot(Intact, features = gene,dot.scale = 10,dot.min=0,group.by = 'cluster1')+RotatedAxis()+
+  scale_x_discrete("")+scale_y_discrete()+scale_color_gradientn(colours = rev(c("chocolate","white","slateblue")))+
+  scale_size_continuous(range=c(5, 11))+theme(panel.grid = element_line(color="lightgrey"))
+dev.off()
+saveRDS(Intact,file = 'Intact.rds')
+
