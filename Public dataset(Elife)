@@ -1,0 +1,161 @@
+library(Seurat)
+library(ggplot2)
+library(dplyr)
+library(Matrix)
+library(patchwork)
+library(RColorBrewer)
+setwd('/Volumes/Lin/Basal_AB/Revise/elife_GSE150692_RAW/')
+data1 <- read.table('GSM4556594_ML001_clean_raw_counts_matrix.txt',header = T,row.names = 1)
+data2 <- read.table('GSM4556595_MM013_clean_raw_counts_matrix.txt',header = T,row.names = 1)
+dim(data1)
+dim(data2)
+M1 <- CreateSeuratObject(counts  = data1, min.cells = 3, min.features = 200, 
+                           project = "M1")
+M2 <- CreateSeuratObject(counts  = data2, min.cells = 3, min.features = 200, 
+                         project = "M2")
+M1
+M2
+#Integration
+M <- merge(M1,M2, add.cell.ids = c("M1", "M2"))
+M #16975 features across 5285 samples within 1 assay
+mito.features <- grep(pattern = "^mt-", x = rownames(x = M), value = TRUE)
+percent.mito <- Matrix::colSums(x = GetAssayData(object = M, slot = "counts")[mito.features,  ])/Matrix::colSums(x = GetAssayData(object =M, slot = "counts"))
+M[["percent.mito"]] <- percent.mito
+VlnPlot(object =M, features = c("nFeature_RNA", "nCount_RNA", "percent.mito"),
+        ncol = 3)                                                                                
+M <- subset(x = M, subset = percent.mito <0.2 )
+M <- NormalizeData(object = M, normalization.method = "LogNormalize",
+                      scale.factor = 10000)
+M <- FindVariableFeatures(object = M,nfeatures = 1000,selection.method = "vst")
+M <- ScaleData(object = M, features = rownames(x = M))
+M <- RunPCA(object = M, features = VariableFeatures(object =M))
+ElbowPlot(object = M)
+M <- RunHarmony(M,group.by.vars = c('orig.ident'),plot_convergence	=T)
+M <- RunUMAP(M, reduction = "harmony", dims = 1:10)
+M <- FindNeighbors(M, reduction = "harmony", dims = 1:10) %>% FindClusters(resolution = 0.07)
+
+FeaturePlot(M, features = c("C1rb",'Nkx3-1','Trp63',"Krt5","Krt14"),reduction = "umap",cols= c("gray", "red"))
+DimPlot(object = M, reduction = "umap",  pt.size = 1,cols = brewer.pal(9,"Set1"),group.by = 'orig.ident')
+
+pdf('M_umap.pdf',width = 8,height = 6)
+DimPlot(object = M, reduction = "umap",  pt.size = 1,cols = brewer.pal(9,"Set1"))
+dev.off()
+pdf('M_umap_group.pdf',width = 8,height = 6)
+DimPlot(object = M, reduction = "umap",  pt.size = 0.6,group.by = 'orig.ident')
+dev.off()
+pdf('M_m7.pdf',width = 10,height = 8)
+FeaturePlot(M, features = c("Krt5","Krt14","Trp63"),reduction = "umap",cols= c("gray", "red"))
+dev.off()
+saveRDS(M,'M_elife.rds')
+pdf('M_m1.pdf',width = 10,height = 8)
+FeaturePlot(M, features = c("Epcam","Krt8","Krt18","Krt5"),reduction = "umap",cols= c("gray", "red"))
+dev.off()
+pdf('M_m2.pdf',width = 10,height = 8)
+FeaturePlot(M, features = c("Spink1","Sbp","Abo","Hoxb13"),reduction = "umap",cols= c("gray", "red"))
+dev.off()
+pdf('M_m3.pdf',width = 10,height = 8)
+FeaturePlot(M, features = c("Krt4","Psca","Tacstd2","Sox9"),reduction = "umap",cols= c("gray", "red"))
+dev.off()
+pdf('M_m4.pdf',width = 10,height = 8)
+FeaturePlot(M, features = c("Pbsn","Fgl1","Mmp7","Nkx3-1"),reduction = "umap",cols= c("gray", "red"))
+dev.off()
+pdf('M_m5.pdf',width = 10,height = 8)
+FeaturePlot(M, features = c("Col1a1","Col1a2","Mmp2","Col3a1"),reduction = "umap",cols= c("gray", "red"))
+dev.off()
+pdf('M_m6.pdf',width = 10,height = 8)
+FeaturePlot(M, features = c("Kdr","Pecam1","Cdh5"),reduction = "umap",cols= c("gray", "red"))
+dev.off()
+
+pdf('M_m8.pdf',width = 10,height = 8)
+FeaturePlot(M, features = c("Chga","Syp","Tubb3",'Npy'),reduction = "umap",cols= c("gray", "red"))
+dev.off()
+pdf('M_m9.pdf',width = 10,height = 8)
+FeaturePlot(M, features = c("Ccl4","Retnla","Clec4e",'Arg1'),reduction = "umap",cols= c("gray", "red"))
+dev.off()
+pdf('M_m10.pdf',width = 10,height = 8)
+FeaturePlot(M, features = c("Svs2","Svs5","Svs4"),reduction = "umap",cols= c("gray", "red"))
+dev.off()
+pdf('M_m11.pdf',width = 10,height = 8)
+FeaturePlot(M, features = c("Mzb1","Jchain","Ly6c2"),reduction = "umap",cols= c("gray", "red"))
+dev.off()
+marker <- FindAllMarkers(M,only.pos = T,logfc.threshold = 0.25)
+write.csv(marker,'M_marker.csv')
+gene= c("Krt5","Krt14","Trp63","Krt8","Krt18","Sbp","Abo","Hoxb13","Pbsn","Fgl1","Mmp7","Nkx3-1",
+        "Krt4","Psca","Tacstd2","Sox9","Svs2","Svs5",
+        "Svs4","Col1a1","Col1a2","Mmp2","Col3a1",
+        "Ccl4","Retnla",'Arg1')
+cluster <- as.character(M$seurat_clusters)
+cluster[cluster==0]='Luminal-B'
+cluster[cluster==1]='Basal'
+cluster[cluster==2]='Luminal-A'
+cluster[cluster==3]='Stromal'
+cluster[cluster==4]='Luminal-C'
+cluster[cluster==5]='Luminal-B'
+cluster[cluster==6]='Macrophage'
+cluster[cluster==7]='SV'
+
+M$cluster <- factor(cluster,levels = c('Basal','Luminal-A','Luminal-B','Luminal-C','SV','Stromal','Macrophage'))
+
+pdf('M_umap.pdf',width = 8,height = 6)
+DimPlot(object = M, reduction = "umap",  pt.size = 1,cols = brewer.pal(8,"Set2"),group.by = 'cluster')
+dev.off()
+pdf('M_dotplot.pdf',width = 8,height = 5)
+p1=DotPlot(M, features = gene,dot.scale = 10,dot.min=0,group.by = 'cluster')+RotatedAxis()+
+  scale_x_discrete("")+scale_y_discrete()+scale_color_gradientn(colours = rev(c("chocolate","white","slateblue")))+
+  scale_size_continuous(range=c(5, 11))+theme(panel.grid = element_line(color="lightgrey"))
+dev.off()
+
+
+
+Basal_M <- M[,M$seurat_clusters==1]
+Basal_M <- NormalizeData(object = Basal_M, normalization.method = "LogNormalize",scale.factor = 10000)
+Basal_M <- FindVariableFeatures(object = Basal_M,nfeatures = 2000,selection.Method = "vst")
+Basal_M <- ScaleData(object = Basal_M, features = rownames(x = Basal_M))
+Basal_M <- RunPCA(object = Basal_M, features = VariableFeatures(object =Basal_M))
+ElbowPlot(object = Basal_M)
+Basal_M <- RunHarmony(Basal_M,group.by.vars = c('orig.ident'),plot_convergence	=T)
+Basal_M <- RunUMAP(Basal_M, reduction = "harmony", dims = 1:20)
+Basal_M <- FindNeighbors(Basal_M, reduction = "harmony", dims = 1:20) %>% FindClusters(resolution = 0.02)
+FeaturePlot(Basal_M,features =c('Nkx3-1','C1rb'))
+cluster_B <- as.character(Basal_M$seurat_clusters)
+cluster_B[cluster_B==0]='Basal-A'
+cluster_B[cluster_B==1]='Basal-B'
+Basal_M$cluster <- cluster_B
+pdf('Basal_M.pdf',width = 8,height = 6)
+DimPlot(Basal_M,reduction = 'umap',pt.size = 1,cols =brewer.pal(11,"RdYlBu")[c(3,9)],group.by = 'cluster')
+dev.off()
+
+marker <- FindAllMarkers(Basal_M,only.pos = T,logfc.threshold = 0.25)
+marker <- marker[marker$p_val_adj<=0.05,]
+dim(marker)
+write.csv(marker,'basal_marker.csv')
+saveRDS(Basal_M,file = 'Basal_M.rds')
+genes <- c("Nkx3-1","Pbsn","C1rb","Krt17","Dlk2","Prelp")
+FeaturePlot(Basal_M,features = genes)
+pdf('Basal_dotplot.pdf',width = 7,height = 4)
+DotPlot(Basal_M, features = genes,dot.scale = 10,dot.min=0,group.by = 'cluster')+RotatedAxis()+
+  scale_x_discrete("")+scale_y_discrete()+scale_color_gradientn(colours = rev(c("chocolate","white","slateblue")))+
+  scale_size_continuous(range=c(5, 11))+theme(panel.grid = element_line(color="lightgrey"))
+dev.off()
+VlnPlot(Basal_M,features =genes,cols = brewer.pal(8,"Set2"),pt.size = 0 )
+VlnPlot(Basal_M,features =genes,cols = brewer.pal(8,"Set2") )
+VlnPlot(Basal_M,features = 'Pbsn')
+saveRDS(Basal_M,file = 'Basal_M.rds')
+
+cluster_basal <- as.character(Basal_M$cluster)
+cell <- colnames(Basal_M)
+A <- cell[cluster_basal=='Basal-A']
+B <- cell[cluster_basal=='Basal-B']
+cell_all <- colnames(M)
+cluster[cell_all%in%A]<-'Basal-A'
+cluster[cell_all%in%B]<-'Basal-B'
+table(cluster)
+levels(cluster)
+M$cluster1 <- factor(cluster,levels = c('Basal-A','Basal-B','Luminal-A','Luminal-B','Luminal-C','SV','Stromal','Macrophage')
+
+pdf('M_dotplot.pdf',width = 15,height = 6)
+p2=DotPlot(M, features = gene,dot.scale = 10,dot.min=0,group.by = 'cluster1')+RotatedAxis()+
+  scale_x_discrete("")+scale_y_discrete()+scale_color_gradientn(colours = rev(c("chocolate","white","slateblue")))+
+  scale_size_continuous(range=c(5, 11))+theme(panel.grid = element_line(color="lightgrey"))
+dev.off()
+p1+p2
