@@ -1,0 +1,49 @@
+library(Seurat)
+library(RColorBrewer)
+library(DoubletFinder)
+library(tidyverse)
+library(patchwork)
+Basal <- readRDS('NG_basal.rds')
+DimPlot(Basal)
+Idents(Basal)<- Basal$cluster
+VlnPlot(Basal,features = c('nCount_RNA','nFeature_RNA'),cols = brewer.pal(3,'Set2'))
+sweep.res.list_Basal <- paramSweep_v3(Basal, PCs = 1:30, sct = FALSE)
+#head(sweep.res.list_Basal)
+sweep.stats_Basal <- summarizeSweep(sweep.res.list_Basal, GT = FALSE)
+bcmvn_Basal <- find.pK(sweep.stats_Basal) #可以看到最佳参数的点
+## 所以最佳的参数是：
+mpK<-as.numeric(as.vector(bcmvn_Basal$pK[which.max(bcmvn_Basal$BCmetric)]))
+annotations <- Basal@meta.data$cluster
+homotypic.prop <- modelHomotypic(annotations)  
+DoubletRate = ncol(Basal)*8*1e-6 #按每增加1000个细胞，双细胞比率增加千分之8来计算
+DoubletRate = 0.005968
+#估计同源双细胞比例，根据modelHomotypic()中的参数人为混合双细胞。这里是从seurat_clusters中来混双细胞 
+nExp_poi <- round(DoubletRate*length(Basal$cluster))  #最好提供celltype，而不是seurat_clusters。
+# 计算双细胞比例
+nExp_poi.adj <- round(nExp_poi*(1-homotypic.prop))
+Basal <- doubletFinder_v3(Basal, PCs = 1:10, pN = 0.25, pK = mpK, nExp = nExp_poi, reuse.pANN = FALSE, sct = F)
+Basal <- doubletFinder_v3(Basal, PCs = 1:10, pN = 0.25, pK = mpK, nExp = nExp_poi.adj, reuse.pANN = FALSE, sct = F)
+Basal@meta.data[,"DF_hi.lo"] <- Basal@meta.data$DF.classifications_0.25_0.02_4
+Basal@meta.data$DF_hi.lo[which(Basal@meta.data$DF_hi.lo == "Doublet" & Basal@meta.data$DF.classifications_0.25_0.01_198 == "Singlet")] <- "Doublet-Low Confidience"
+Basal@meta.data$DF_hi.lo[which(Basal@meta.data$DF_hi.lo == "Doublet")] <- "Doublet-High Confidience"
+table(Basal@meta.data$DF_hi.lo)
+# Doublet-High Confidience                  Singlet 
+#4                      742 
+pdf('doublet_Basal.pdf',width = 8,height = 6)
+DimPlot(Basal, reduction = "tsne", group.by ="DF_hi.lo",cols =c("#B44700","grey"),pt.size = 1.2)
+dev.off()
+Basal_r <- Basal[,Basal$DF_hi.lo=='Singlet']
+Basal_r 
+Basal_r <- RunPCA(Basal_r, features = VariableFeatures(object = Basal_r))
+Basal_r <- RunTSNE(Basal_r, reduction = "pca", dims = 1:10)
+Basal_r <- FindNeighbors(Basal_r, reduction = "pca", dims = 1:10)
+Basal_r <- FindClusters(Basal_r,resolution = 0.02)
+p1=DimPlot(Basal_r,reduction = 'tsne',cols =brewer.pal(6,'Set3'),pt.size = 2 )
+p2 = DimPlot(Basal_r,reduction = 'tsne',group.by = 'cluster',cols =brewer.pal(6,'Set2'),pt.size = 2 )
+pdf('singlet_reclustering.pdf',width = 10,height = 4)
+p1+p2
+dev.off()
+marker <- FindAllMarkers(Basal_r,only.pos = T,logfc.threshold = 0.25)
+pdf('Vln_singlet.pdf',width = 6,height = 3)
+VlnPlot(Basal_r,features = c('Nkx3-1','C1rb','Pbsn'),cols =brewer.pal(6,'Set3'),pt.size = 0)
+dev.off()
