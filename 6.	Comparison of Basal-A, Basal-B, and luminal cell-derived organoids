@@ -1,0 +1,81 @@
+library(edgeR)
+library(DESeq2)
+library(RColorBrewer)
+count <- read.csv('Organoid_bulk.csv',header = T,row.names = 1)
+dim(count)
+head(count)
+s <- rowMeans(count[,-1])
+count1 <- count[s>0,]
+dim(count1)
+group <- rep(c('Bas_A','Bas_B','Lum'),c(3,3,3))
+group <- as.factor(group)
+colData <- data.frame(row.names=colnames(count1[,-1]), group_list=group)
+dds <- DESeqDataSetFromMatrix(countData = count1[,-1], colData = colData, design = ~ group_list)
+mcols(dds)$basepairs <- count1$Length
+my_fpkm <- fpkm(dds)
+head(my_fpkm)
+basala <- rowMeans(my_fpkm[,1:3])
+basalb <- rowMeans(my_fpkm[,4:6])
+lum <- rowMeans(my_fpkm[,7:9])
+da <- data.frame(basala,basalb,lum)
+cor_A <- cor(my_fpkm)
+cor_A
+write.csv(cor_A,'cor.csv')
+cor_Lum_A <- as.vector(cor_A[1:3,7:9])
+cor_Lum_A
+cor_Lum_B <- as.vector(cor_A[4:6,7:9])
+cor_Lum_B
+t.test(cor_Lum_A,cor_Lum_B,alternative = 'less')#p-value = 0.008802
+A <- cor(da)
+A
+pheatmap(A,cluster_rows = F,cluster_cols = F)
+
+cor_vln <- data.frame(A=c(cor_Lum_A,cor_Lum_B),group=rep(c('A','B'),each=9))
+cor_vln
+ggplot(data = cor_vln) + geom_violin(aes(x = group, y = A, 
+                                              fill = factor(group)))+theme_bw()+scale_fill_manual(values = c("#edd08e","#094c8b")) 
+
+
+
+write.csv(my_fpkm,'Organoid_fpkm.csv')
+pca1 <- prcomp(log(my_fpkm+1))
+pca_data <- pca1$rotation[,1:2]
+head(pca_data)
+pca_data <- as.data.frame(pca_data)
+pca_data$group <- group
+pca1$sdev/sum(pca1$sdev)
+#0.77393724 0.05499343 
+ggplot()+
+  geom_point(data=pca_data,
+             aes(x=PC1,
+                 y=PC2,
+                 fill=group),
+             size=10,
+             shape=21)+theme_bw()+scale_fill_manual(values = c("#ef7a79","#edd08e","#094c8b")) 
+ 
+y <- DGEList(counts=count1[,-1],group=group,genes=rownames(count1))
+dge <- calcNormFactors(y)
+design <- model.matrix(~0+group)
+colnames(design) <- levels(group)
+dge <- estimateDisp(dge, design,robust=TRUE)
+fit <- glmQLFit(dge,design,robust=TRUE)
+sig_cut=0.5
+AB <- makeContrasts(A=Bas_A-Bas_B,levels = design)
+AC <- makeContrasts(A=Bas_B-Bas_A,levels = design)
+lrtAB <- glmQLFTest(fit, contrast=AB)
+lrtAC <- glmQLFTest(fit, contrast=AC)
+diffAB <- topTags(lrtAB,n=40000,adjust.method="BH", sort.by="PValue", p.value=sig_cut)$table
+diffAC <- topTags(lrtAC,n=40000,adjust.method="BH", sort.by="PValue", p.value=sig_cut)$table
+BasA <- diffAB[diffAB$logFC>0.5,]
+dim(BasA)#312   6
+BasB <- diffAC[diffAC$logFC>0.5,]
+dim(BasB)
+BasA <- BasA[BasA$PValue<0.01,]
+dim(BasA)
+BasB <- BasB[BasB$PValue<0.01,]
+dim(BasB)
+write.csv(BasA,'BasA_sig.csv')
+write.csv(BasB,'BasB_sig.csv')
+ggplot(data = ToothGrowth) + geom_boxplot(aes(x = supp, y = len, 
+                                              fill = factor(dose)))
+
